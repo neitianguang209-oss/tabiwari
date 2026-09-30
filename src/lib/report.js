@@ -21,9 +21,10 @@ export function settlementText(snap, bal) {
   const base = trip.base || 'JPY';
   const name = (id) => snap.memberById.get(id)?.name ?? '?';
   const { transfers } = settlementPlan(snap, bal);
+  const showTotals = !!trip.settle?.showTotals;
   const lines = [];
   lines.push(`【${trip.emoji ?? ''}${trip.name} の精算】`);
-  lines.push(`総額 ${fmt(bal.spent, base)}（${bal.count}件）`);
+  if (showTotals) lines.push(`この旅の合計 ${fmt(bal.spent, base)}（${bal.count}件）`);
   lines.push('');
   if (!transfers.length) {
     lines.push('✅ 精算はすべて完了しています');
@@ -31,12 +32,14 @@ export function settlementText(snap, bal) {
     lines.push('▼ 送金してください');
     for (const t of transfers) lines.push(`${name(t.from)} → ${name(t.to)}　${fmt(t.amount, base)}`);
   }
-  lines.push('');
-  lines.push('▼ ひとりずつ（立替 / 使った額）');
-  for (const m of snap.members) {
-    const b = bal.members[m.id];
-    if (!b) continue;
-    lines.push(`${m.name}　${fmt(b.paid, base)} / ${fmt(b.share, base)}`);
+  if (showTotals) {
+    lines.push('');
+    lines.push('▼ ひとりずつの利用額（立て替えた額）');
+    for (const m of snap.members) {
+      const b = bal.members[m.id];
+      if (!b) continue;
+      lines.push(`${m.name}　${fmt(b.share, base)}（立替 ${fmt(b.paid, base)}）`);
+    }
   }
   if ((trip.settle?.unit ?? 1) > 1) {
     lines.push('');

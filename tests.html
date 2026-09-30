@@ -150,6 +150,25 @@ eq('金額0', computeShares({ amount: 0, split: { mode: 'equal', members: ['a'] 
   eq('幹事b にまとめる', s2.transfers, [{ from: 'b', to: 'a', amount: 3000 }, { from: 'c', to: 'b', amount: 1000 }, { from: 'd', to: 'b', amount: 1000 }]);
 }
 
+// --- 電卓 ---
+{
+  const { evaluate, pushKey } = await import('./src/lib/calc.js');
+  const typeKeys = (keys) => keys.reduce((e, k) => pushKey(e, k), '');
+  eq('電卓キー 1,2,8,0,+,6,0,0,=', typeKeys(['1','2','8','0','+','6','0','0','=']), '1880');
+  eq('電卓キー 記号の押し直し', typeKeys(['5','+','×','2']), '5×2');
+  eq('電卓キー ＋税10%', typeKeys(['1','0','0','0','%tax10']), '1000×1.1');
+  eq('電卓キー 式に＋税10%', typeKeys(['5','0','0','+','5','0','0','%tax10']), '(500+500)×1.1');
+  eq('電卓キー 小数点は1回だけ', typeKeys(['1','.','5','.','2']), '1.52');
+  eq('電卓 1280+600', evaluate('1280+600'), 1880);
+  eq('電卓 かけ算が先', evaluate('100+20×3'), 160);
+  eq('電卓 かっこ', evaluate('(1280+600)×1.1'), 2068);
+  eq('電卓 わり算', evaluate('4664÷4'), 1166);
+  eq('電卓 途中の式（末尾の記号は無視）', evaluate('1200+'), 1200);
+  eq('電卓 マイナス始まり', evaluate('−500+2000'), 1500);
+  eq('電卓 0で割る', evaluate('10÷0'), null);
+  eq('電卓 カンマ入り', evaluate('1,280+1,000'), 2280);
+}
+
 out.insertAdjacentHTML('afterbegin', `<h2 id="summary" class="${fail ? 'ng' : 'ok'}">${pass} 件成功 / ${fail} 件失敗</h2>`);
 </script>
 </body>

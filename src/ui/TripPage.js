@@ -10,6 +10,8 @@ import { Settle } from './Settle.js';
 import { Stats } from './Stats.js';
 import { Settings } from './Settings.js';
 import { setPendingReceipt } from './receipt.js';
+import { CalcSheet } from './Calculator.js';
+import { defaultCurrency } from './ExpenseEditor.js';
 
 const { useEffect, useState } = React;
 
@@ -26,6 +28,7 @@ export function TripPage({ tripId, tab, query }) {
   const { snap, bal, me, sync, pending } = useTripData(tripId);
   const online = useOnline();
   const [shareOpen, setShareOpen] = useState(query?.share === '1');
+  const [calcOpen, setCalcOpen] = useState(false);
   const [whoSkipped, setWhoSkipped] = useState(() => { try { return sessionStorage.getItem('tabiwari:skipme:' + tripId) === '1'; } catch { return false; } });
 
   useEffect(() => {
@@ -83,6 +86,7 @@ export function TripPage({ tripId, tab, query }) {
           <${SyncPill} sync=${sync} pending=${pending} online=${online} onClick=${() => { flushAll(); pull(tripId); }} />
         </div>
       </div>
+      <button class="icon-btn" aria-label="電卓" title="電卓" onClick=${() => setCalcOpen(true)}><${Icon} name="calc" /></button>
       <button class="icon-btn" aria-label="メンバーに共有" onClick=${() => setShareOpen(true)}><${Icon} name="share" /></button>
     </div>
 
@@ -111,6 +115,8 @@ export function TripPage({ tripId, tab, query }) {
       onPick=${(id) => { setMe(tripId, id); toast('ようこそ！'); }}
       onSkip=${() => { try { sessionStorage.setItem('tabiwari:skipme:' + tripId, '1'); } catch { /* 無視 */ } setWhoSkipped(true); }} />
     <${ShareSheet} open=${shareOpen} onClose=${() => setShareOpen(false)} snap=${snap} />
+    <${CalcSheet} open=${calcOpen} onClose=${() => setCalcOpen(false)} cur=${defaultCurrency(snap)}
+      onRecord=${(v) => go(`/t/${tripId}/e/new?amount=${encodeURIComponent(v)}`)} />
   </div>`;
 }
 

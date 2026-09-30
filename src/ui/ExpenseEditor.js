@@ -13,6 +13,7 @@ import {
   takePendingReceipt, compressImage, readReceipt, AI_ERRORS,
 } from './receipt.js';
 import { AiSetupSheet } from './AiSetup.js';
+import { CalcSheet, CalcButton } from './Calculator.js';
 
 const { useState, useEffect, useMemo, useRef } = React;
 
@@ -34,6 +35,14 @@ function AmountField({ value, cur, onChange, placeholder = '0', className = '', 
     onInput=${(e) => { setText(e.target.value); onChange(parseAmount(e.target.value, cur)); }} />`;
 }
 
+// 小さい金額欄（左端に電卓ボタン入り）
+function CalcAmount({ value, cur, onChange, onCalc, ariaLabel, placeholder = '0' }) {
+  return html`<span class="amt-group">
+    <${CalcButton} onClick=${onCalc} label=${ariaLabel + 'を電卓で計算'} />
+    <${AmountField} value=${value} cur=${cur} ariaLabel=${ariaLabel} placeholder=${placeholder} onChange=${onChange} />
+  </span>`;
+}
+
 export function ExpenseEditor({ tripId, expenseId, query }) {
   useEffect(() => { openTrip(tripId); return () => closeTrip(tripId); }, [tripId]);
   const { snap, me } = useTripData(tripId);
@@ -48,18 +57,24 @@ export function ExpenseEditor({ tripId, expenseId, query }) {
     </div>`;
   }
   if (existing?.kind === 'transfer') return html`<${TransferEditor} snap=${snap} existing=${existing} />`;
-  return html`<${ExpenseForm} snap=${snap} me=${me} existing=${existing} autoReceipt=${query?.receipt === '1'} />`;
+  return html`<${ExpenseForm} snap=${snap} me=${me} existing=${existing} autoReceipt=${query?.receipt === '1'} presetAmount=${query?.amount ?? null} />`;
 }
 
-function makeDraft(snap, me) {
+// 新しい記録で最初に選んでおく通貨（前回の通貨。海外の旅の期間中なら外貨）
+export function defaultCurrency(snap) {
   const trip = snap.trip;
   const base = trip.base || 'JPY';
   const prefs = getPrefs(snap.id);
   const date = todayStr();
   const curs = tripCurrencies(trip);
-  // 海外の旅で、今日が旅の期間中なら外貨を最初から選んでおく
   let currency = curs.includes(prefs.lastCurrency) ? prefs.lastCurrency : base;
   if (!prefs.lastCurrency && curs.length > 1 && trip.start && date >= trip.start && (!trip.end || date <= trip.end)) currency = curs[1];
+  return currency;
+}
+
+function makeDraft(snap, me) {
+  const date = todayStr();
+  const currency = defaultCurrency(snap);
   return {
     id: newExpenseId(),
     kind: 'expense',
@@ -109,13 +124,19 @@ function normalize(x) {
   return y;
 }
 
-function ExpenseForm({ snap, me, existing, autoReceipt }) {
+function ExpenseForm({ snap, me, existing, autoReceipt, presetAmount }) {
   const trip = snap.trip;
   const tripId = snap.id;
   const base = trip.base || 'JPY';
   const currencies = tripCurrencies(trip);
   const isNew = !existing;
-  const [x, setX] = useState(() => (existing ? { ...clone(existing), split: { rest: 'equal', lines: [], exact: {}, ...clone(existing.split ?? {}) } } : makeDraft(snap, me)));
+  const [x, setX] = useState(() => {
+    if (existing) return { ...clone(existing), split: { rest: 'equal', lines: [], exact: {}, ...clone(existing.split ?? {}) } };
+    const d = makeDraft(snap, me);
+    // 旅の画面の電卓から「この金額で記録」で来たとき
+    if (presetAmount) d.amount = parseAmount(presetAmount, d.currency);
+    return d;
+  });
   const [start] = useState(() => JSON.stringify(x));
   const [catTouched, setCatTouched] = useState(!!existing?.category);
   const [partTouched, setPartTouched] = useState(!!existing);
@@ -125,6 +146,8 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
   const [aiImg, setAiImg] = useState(null);
   const [receiptInfo, setReceiptInfo] = useState(null);
   const [showMore, setShowMore] = useState(!!(existing?.memo));
+  const [calc, setCalc] = useState(null); // { initial, cur, apply }
+  const openCalc = (value, c, apply) => setCalc({ initial: value ? toInputString(value, c) : '', cur: c, apply });
   const xRef = useRef(x);
   xRef.current = x;
   const scanToken = useRef(0);
@@ -140,6 +163,11 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
   const setSplit = (patch) => setX((p) => ({ ...p, split: { ...p.split, ...patch } }));
 
   // 旅の画面のカメラボタンから来たときは、すぐ読み取りを始める
+  useEffect(() => {
+    if (presetAmount && !autoReceipt) go(`/t/${tripId}/e/new`, { replace: true });
+  }, []);
+  // 支払額を変えたら、1人で払ったときの「払った額」も合わせる
+  const setAmount = (v) => setX((p) => ({ ...p, amount: v, payers: p.payers && Object.keys(p.payers).length === 1 ? { [Object.keys(p.payers)[0]]: v } : p.payers }));
   useEffect(() => {
     if (!autoReceipt) return;
     go(`/t/${tripId}/e/new`, { replace: true });
@@ -336,8 +364,8 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
     <!-- 金額 -->
     <div class="amount-box">
       <span class="sym" aria-hidden="true">${curInfo(cur).sym.trim()}</span>
-      <${AmountField} big id="amount" value=${x.amount} cur=${cur} ariaLabel="支払った金額" placeholder="0"
-        onChange=${(v) => setX((p) => ({ ...p, amount: v, payers: p.payers && Object.keys(p.payers).length === 1 ? { [Object.keys(p.payers)[0]]: v } : p.payers }))} />
+      <${AmountField} big id="amount" value=${x.amount} cur=${cur} ariaLabel="支払った金額" placeholder="0" onChange=${setAmount} />
+      <${CalcButton} big label="電卓で支払額を計算" onClick=${() => openCalc(x.amount, cur, setAmount)} />
       ${currencies.length > 1 ? html`<button type="button" class="cur-btn" onClick=${() => setCurOpen(true)} aria-label="通貨を変える">
         ${curInfo(cur).flag} ${cur}<${Icon} name="chevronDown" size=${16} /></button>` : null}
     </div>
@@ -347,8 +375,8 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
     </div>
     ${showBaseAmt ? html`<div class="row" style=${{ marginTop: '8px' }}>
       <span class="small muted grow">カード明細の請求額（わかれば。こちらを優先します）</span>
-      <${AmountField} value=${x.baseAmount} cur=${base} ariaLabel="円での実際の支払額" placeholder=${baseEq != null ? toInputString(baseEq, base) : '0'}
-        onChange=${(v) => set({ baseAmount: v })} className="" />
+      <${CalcAmount} value=${x.baseAmount} cur=${base} ariaLabel="円での実際の支払額" placeholder=${baseEq != null ? toInputString(baseEq, base) : '0'}
+        onChange=${(v) => set({ baseAmount: v })} onCalc=${() => openCalc(x.baseAmount, base, (v) => set({ baseAmount: v }))} />
     </div>` : null}` : null}
 
     <!-- 何に -->
@@ -374,8 +402,9 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
     </div>` : html`<div class="card">
       ${memberRows.map((m) => html`<div class="split-row" key=${m.id}>
         <${Avatar} m=${m} /><span class="grow bold">${m.name}</span>
-        <${AmountField} value=${x.payers[m.id] ?? null} cur=${cur} ariaLabel=${m.name + 'が払った額'} placeholder="0"
-          className="" onChange=${(v) => setX((p) => ({ ...p, payers: { ...p.payers, [m.id]: v } }))} />
+        <${CalcAmount} value=${x.payers[m.id] ?? null} cur=${cur} ariaLabel=${m.name + 'が払った額'}
+          onChange=${(v) => setX((p) => ({ ...p, payers: { ...p.payers, [m.id]: v } }))}
+          onCalc=${() => openCalc(x.payers[m.id], cur, (v) => setX((p) => ({ ...p, payers: { ...p.payers, [m.id]: v } })))} />
       </div>`)}
       <div class="small" style=${{ textAlign: 'right', marginTop: '6px' }}>
         ${x.amount > 0 && paidSum !== x.amount
@@ -443,7 +472,8 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
           <div class="top">
             <input class="input compact grow" placeholder="品目（なくてもOK）" value=${l.name ?? ''} aria-label="品目名"
               onInput=${(e) => updLine(l.id, { name: e.target.value })} />
-            <${AmountField} value=${l.amount} cur=${cur} ariaLabel="品目の金額" className="" onChange=${(v) => updLine(l.id, { amount: v })} />
+            <${CalcAmount} value=${l.amount} cur=${cur} ariaLabel="品目の金額" onChange=${(v) => updLine(l.id, { amount: v })}
+              onCalc=${() => openCalc(l.amount, cur, (v) => updLine(l.id, { amount: v }))} />
             <button type="button" class="icon-btn" aria-label="この行を消す" onClick=${() => delLine(l.id)}><${Icon} name="close" size=${18} /></button>
           </div>
           ${l.orig ? html`<div class="orig">${l.orig}</div>` : null}
@@ -467,8 +497,9 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
     ${split.mode === 'exact' ? html`<div class="card" style=${{ marginTop: '12px' }}>
       ${memberRows.filter((m) => split.members.includes(m.id)).map((m) => html`<div class="split-row" key=${m.id}>
         <${Avatar} m=${m} /><span class="grow bold">${m.name}</span>
-        <${AmountField} value=${split.exact?.[m.id] ?? null} cur=${cur} ariaLabel=${m.name + 'の分'} className=""
-          onChange=${(v) => setX((p) => ({ ...p, split: { ...p.split, exact: { ...(p.split.exact ?? {}), [m.id]: v } } }))} />
+        <${CalcAmount} value=${split.exact?.[m.id] ?? null} cur=${cur} ariaLabel=${m.name + 'の分'}
+          onChange=${(v) => setX((p) => ({ ...p, split: { ...p.split, exact: { ...(p.split.exact ?? {}), [m.id]: v } } }))}
+          onCalc=${() => openCalc(split.exact?.[m.id], cur, (v) => setX((p) => ({ ...p, split: { ...p.split, exact: { ...(p.split.exact ?? {}), [m.id]: v } } })))} />
       </div>`)}
       <${RestBox} x=${x} detail=${detail} cur=${cur} onRest=${(v) => setSplit({ rest: v })}
         onFit=${() => set({ amount: detail?.linesTotal ?? 0 })} kind="exact" />
@@ -538,6 +569,9 @@ function ExpenseForm({ snap, me, existing, autoReceipt }) {
 
     <${AiSetupSheet} open=${!!aiImg} tripId=${tripId} onClose=${() => setAiImg(null)}
       onReady=${() => { const img = aiImg; setAiImg(null); if (img) runReceipt(img); }} />
+
+    <${CalcSheet} open=${!!calc} onClose=${() => setCalc(null)} initial=${calc?.initial ?? ''} cur=${calc?.cur ?? cur}
+      onApply=${(v) => calc?.apply(v)} />
   </div>`;
 }
 

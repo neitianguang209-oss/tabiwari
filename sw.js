@@ -1,6 +1,6 @@
 // たびわり Service Worker（オフラインでもアプリを開けるように）
 // アプリを更新して公開するたびに CACHE_NAME の番号を上げること（上げないと古い画面が出続ける）
-const CACHE_NAME = 'tabiwari-v1';
+const CACHE_NAME = 'tabiwari-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -21,6 +21,8 @@ const APP_SHELL = [
   './src/lib/split.js',
   './src/lib/store.js',
   './src/ui/AiSetup.js',
+  './src/ui/Calculator.js',
+  './src/lib/calc.js',
   './src/ui/App.js',
   './src/ui/components.js',
   './src/ui/CreateTrip.js',

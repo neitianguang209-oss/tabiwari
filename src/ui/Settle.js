@@ -4,7 +4,7 @@ import { fmt } from '../lib/money.js';
 import { updateTrip, saveExpense, deleteExpense } from '../lib/store.js';
 import { settlementPlan, settlementText } from '../lib/report.js';
 import { Icon } from './icons.js';
-import { Avatar, Seg, Sheet, Note, toast, confirmDialog, copyText, lineShareUrl, fmtDate } from './components.js';
+import { Avatar, Seg, Sheet, Note, Switch, toast, confirmDialog, copyText, lineShareUrl, fmtDate } from './components.js';
 import { newTransfer, TransferFields } from './ExpenseEditor.js';
 
 const { useState, useMemo } = React;
@@ -21,6 +21,8 @@ export function Settle({ snap, bal, me }) {
   const done = snap.expenses.filter((x) => x.kind === 'transfer');
   const maxAbs = Math.max(1, ...snap.members.map((x) => Math.abs(bal.members[x.id]?.net ?? 0)));
   const hasExpenses = bal.count > 0;
+  const showTotals = !!trip.settle?.showTotals;
+  const maxShare = Math.max(1, ...snap.members.map((x) => bal.members[x.id]?.share ?? 0));
 
   async function markPaid(t) {
     const ok = await confirmDialog({
@@ -88,6 +90,36 @@ export function Settle({ snap, bal, me }) {
     </div>` : null}
     ${Object.keys(plan.adjust).length ? html`<div class="tiny faint" style=${{ marginTop: '8px' }}>
       ${unit}円単位にまとめたため、${Object.entries(plan.adjust).map(([id, d]) => `${m(id)?.name} ${d > 0 ? '+' : '−'}${Math.abs(d)}円`).join('、')} の端数調整が入っています。
+    </div>` : null}
+
+    <!-- 旅の合計と一人ずつの利用額（見たいときだけ） -->
+    ${hasExpenses ? html`<div class="card totals">
+      <${Switch} on=${showTotals} label="旅の合計と一人ずつの利用額を表示"
+        onChange=${(v) => updateTrip(snap.id, { settle: { ...(trip.settle ?? {}), showTotals: v } })}
+        sub="オンにすると、LINEで送る文面にも入ります（メンバー全員に共通の設定）">旅の合計と一人ずつの利用額<//>
+      ${showTotals ? html`<div style=${{ marginTop: '12px' }}>
+        <div class="grand">
+          <div><div class="bold">この旅の合計</div><div class="tiny muted">${bal.count}件 · 平均 ${fmt(Math.round(bal.spent / (snap.members.length || 1)), base)}/人</div></div>
+          <span class="v">${fmt(bal.spent, base)}</span>
+        </div>
+        ${snap.members.map((mm) => {
+          const b = bal.members[mm.id] ?? { paid: 0, share: 0 };
+          const pct = bal.spent ? Math.round((100 * b.share) / bal.spent) : 0;
+          return html`<button class="use-row" key=${mm.id} style=${{ width: '100%', background: 'none', border: 0, textAlign: 'left' }}
+            onClick=${() => go(`/t/${snap.id}/m/${mm.id}`)} aria-label=${`${mm.name}の利用額 ${fmt(b.share, base)}`}>
+            <${Avatar} m=${mm} />
+            <div style=${{ minWidth: 0 }}>
+              <div class="bold ellipsis">${mm.name}${mm.id === me ? html`<span class="tiny muted">（あなた）</span>` : null}</div>
+              <div class="bar" aria-hidden="true"><i style=${{ width: `${(100 * b.share) / maxShare}%` }}></i></div>
+            </div>
+            <div style=${{ textAlign: 'right' }}>
+              <div class="v">${fmt(b.share, base)}</div>
+              <div class="tiny muted">${pct}% · 立替 ${fmt(b.paid, base)}</div>
+            </div>
+          </button>`;
+        })}
+        <div class="tiny faint" style=${{ marginTop: '8px' }}>利用額＝その人が使った分（負担額）。名前をタップすると1件ずつの内訳が見られます。</div>
+      </div>` : null}
     </div>` : null}
 
     <!-- ひとりずつ -->

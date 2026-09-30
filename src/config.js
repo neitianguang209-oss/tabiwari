@@ -4,4 +4,4 @@ export const SUPABASE_KEY = 'sb_publishable_-sNQxpwsU7JxhPF9S2vn5A_-CCTqQZL';
 export const FN_URL = SUPABASE_URL + '/functions/v1/tabiwari';
 // 共有リンクの行き先（ローカルで動かしているときも、友だちには公開版のリンクを渡す）
 export const PUBLIC_URL = 'https://neitianguang209-oss.github.io/tabiwari/';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
