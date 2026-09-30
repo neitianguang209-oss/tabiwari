@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>たびわり</title>
+  <meta name="description" content="旅行の立て替えを記録して、最後にぴったり精算する割り勘アプリ" />
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="たびわり" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Zen+Maru+Gothic:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.3.1",
+      "react-dom/client": "https://esm.sh/react-dom@18.3.1/client?external=react",
+      "htm": "https://esm.sh/htm@3.1.1",
+      "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.4",
+      "qrcode-generator": "https://esm.sh/qrcode-generator@1.4.4"
+    }
+  }
+  </script>
+  <style>
+    /* JS が読み込まれるまでの間に出す画面 */
+    .boot { min-height: 100dvh; display: grid; place-items: center; }
+    .boot img { width: 64px; height: 64px; border-radius: 18px; animation: bootp 1.2s ease-in-out infinite; }
+    @keyframes bootp { 50% { transform: scale(.92); opacity: .7; } }
+  </style>
+</head>
+<body>
+  <div id="root"><div class="boot"><img src="icons/icon-192.png" alt="" /></div></div>
+  <script type="module" src="src/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+      window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+    }
+  </script>
+</body>
+</html>

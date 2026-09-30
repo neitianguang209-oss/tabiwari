@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>たびわり 計算テスト</title>
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 16px; }
+  .ok { color: #0a7d32; } .ng { color: #c62828; font-weight: 700; }
+  pre { background: #f4f4f4; padding: 8px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>計算テスト</h1>
+<div id="out"></div>
+<script type="module">
+import { computeShares, computeBalances, settle, allocate, roundToTotal, expenseInBase } from './src/lib/split.js';
+import { parseAmount, fmt, convertMinor } from './src/lib/money.js';
+
+const out = document.getElementById('out');
+let pass = 0, fail = 0;
+function eq(name, got, want) {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  const ok = g === w;
+  ok ? pass++ : fail++;
+  out.insertAdjacentHTML('beforeend', `<div class="${ok ? 'ok' : 'ng'}">${ok ? '✓' : '✗'} ${name}${ok ? '' : `<pre>got:  ${g}\nwant: ${w}</pre>`}</div>`);
+}
+const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+const near = (got, want) => Object.keys(want).every((k) => Math.abs((got[k] ?? 0) - want[k]) < 1) && Object.keys(got).length === Object.keys(want).length;
+
+// --- 端数 ---
+eq('1000円を3人 → 合計ぴったり', total(Object.fromEntries(allocate(1000, [1, 1, 1]).map((v, i) => [i, v]))), 1000);
+eq('1000円を3人 → 333/333/334 のどれか', allocate(1000, [1, 1, 1], ['a', 'b', 'c']).slice().sort(), [333, 333, 334]);
+eq('roundToTotal 負の値', roundToTotal([-1.5, 1.5], 0).reduce((a, b) => a + b, 0), 0);
+{
+  // 同点の1円が毎回同じ人に行かない
+  const counts = { a: 0, b: 0, c: 0 };
+  for (let i = 0; i < 300; i++) {
+    const r = computeShares({ id: 'e' + i, amount: 100, split: { mode: 'equal', members: ['a', 'b', 'c'] } });
+    for (const id of ['a', 'b', 'c']) if (r.shares[id] === 34) counts[id]++;
+  }
+  eq('端数の1円は3人にだいたい均等に回る', Object.values(counts).every((c) => c > 70), true);
+}
+
+// --- 均等・比率 ---
+eq('均等 3000円/3人', computeShares({ id: 'x', amount: 3000, split: { mode: 'equal', members: ['a', 'b', 'c'] } }).shares, { a: 1000, b: 1000, c: 1000 });
+eq('比率 子ども0.5', computeShares({ id: 'x', amount: 5000, split: { mode: 'equal', members: ['a', 'b', 'c'], weights: { a: 1, b: 1, c: 0.5 } } }).shares, { a: 2000, b: 2000, c: 1000 });
+eq('一部の人だけ（2人）', computeShares({ id: 'x', amount: 3000, split: { mode: 'equal', members: ['a', 'c'] } }).shares, { a: 1500, c: 1500 });
+
+// --- スーパー：個人の物を抜いて残りを均等 ---
+{
+  const r = computeShares({ id: 'x', amount: 5000, split: { mode: 'items', members: ['a', 'b', 'c', 'd'], lines: [{ amount: 800, members: ['a'] }], rest: 'equal' } });
+  eq('スーパー 5000円・aの化粧品800円', r.shares, { a: 1850, b: 1050, c: 1050, d: 1050 });
+  eq('スーパー 残りは4200円', r.rest, 4200);
+}
+
+// --- レストラン：品目＋シェア＋外税を比例配分（質問のプレビューと同じ例）---
+{
+  const exp = { id: 'r', amount: 4664, split: { mode: 'items', members: ['h', 'y', 's'], rest: 'prop', lines: [
+    { amount: 600, members: ['h', 'y'] },   // 生ビール2杯
+    { amount: 380, members: ['s'] },        // ウーロン茶
+    { amount: 1280, members: ['h'] },       // ハンバーグ
+    { amount: 1100, members: ['y'] },       // パスタ
+    { amount: 880, members: [] },           // シーザーサラダ（みんな）
+  ] } };
+  const r = computeShares(exp);
+  eq('レストラン 合計ぴったり', total(r.shares), 4664);
+  eq('レストラン 残り424円は税', r.rest, 424);
+  // h: 300+1280+293.33=1873.33 → ×1.1 = 2060.67 / y: 300+1100+293.33=1693.33 → 1862.67 / s: 380+293.33=673.33 → 740.67
+  eq('レストラン 比例配分（±1円）', near(r.shares, { h: 2060.67, y: 1862.67, s: 740.67 }), true);
+}
+
+// --- 各自の金額＋残りは均等 ---
+{
+  const r = computeShares({ id: 'z', amount: 4664, split: { mode: 'exact', members: ['h', 'y', 's'], exact: { h: 1880, y: 1700, s: 380 }, rest: 'equal' } });
+  eq('各自 残り704円を均等（±1円）', near(r.shares, { h: 2114.67, y: 1934.67, s: 614.67 }), true);
+}
+
+// --- 内訳が合計を超える（割引として比例で減らす）---
+{
+  const r = computeShares({ id: 'd', amount: 1800, split: { mode: 'items', members: ['a', 'b'], rest: 'prop', lines: [{ amount: 1000, members: ['a'] }, { amount: 1000, members: ['b'] }] } });
+  eq('割引200円を比例で', r.shares, { a: 900, b: 900 });
+}
+
+// --- 問題の検出 ---
+eq('参加者なし', computeShares({ amount: 100, split: { mode: 'equal', members: [] } }).problem, '割る人を1人以上選んでください');
+eq('金額0', computeShares({ amount: 0, split: { mode: 'equal', members: ['a'] } }).problem, '金額を入れてください');
+
+// --- 外貨 ---
+{
+  const trip = { base: 'JPY', rates: { KRW: { rate: 0.108 } } };
+  const r = expenseInBase({ id: 'k', amount: 45000, currency: 'KRW', paidBy: 'a', split: { mode: 'equal', members: ['a', 'b', 'c'] } }, trip);
+  eq('45,000ウォン → 4,860円', r.total, 4860);
+  eq('外貨 負担は合計ぴったり', total(r.shares), 4860);
+  eq('外貨 払った人', r.paid, { a: 4860 });
+  const r2 = expenseInBase({ id: 'k2', amount: 45000, currency: 'KRW', baseAmount: 5012, paidBy: 'a', split: { mode: 'equal', members: ['a', 'b'] } }, trip);
+  eq('カードの実額（5,012円）を優先', r2.shares, { a: 2506, b: 2506 });
+  eq('USD 12.50 → minor 1250', parseAmount('12.50', 'USD'), 1250);
+  eq('全角 "１，２８０円"', parseAmount('１，２８０円', 'JPY'), 1280);
+  eq('convertMinor USD→JPY', convertMinor(1250, 'USD', 'JPY', 150), 1875);
+  eq('fmt', [fmt(1280, 'JPY'), fmt(-1280, 'JPY'), fmt(1250, 'USD'), fmt(1200, 'USD'), fmt(45000, 'KRW')], ['¥1,280', '−¥1,280', '$12.50', '$12', '₩45,000']);
+}
+
+// --- 複数人で払った ---
+{
+  const trip = { base: 'JPY' };
+  const r = expenseInBase({ id: 'h', amount: 30000, payers: { a: 20000, b: 10000 }, split: { mode: 'equal', members: ['a', 'b', 'c'] } }, trip);
+  eq('ホテル 2人で払った', r.paid, { a: 20000, b: 10000 });
+  const bad = expenseInBase({ id: 'h', amount: 30000, payers: { a: 20000, b: 9000 }, split: { mode: 'equal', members: ['a', 'b', 'c'] } }, trip);
+  eq('払った額が合わない', bad.problem, '払った額の合計が支払額と合っていません');
+}
+
+// --- 旅行全体＋精算 ---
+{
+  const trip = { base: 'JPY', rates: {} };
+  const members = ['a', 'b', 'c', 'd'].map((id) => ({ id }));
+  const exps = [
+    { id: '1', amount: 12000, paidBy: 'a', split: { mode: 'equal', members: ['a', 'b', 'c', 'd'] } },
+    { id: '2', amount: 8000, paidBy: 'b', split: { mode: 'equal', members: ['a', 'b', 'c', 'd'] } },
+    { id: '3', amount: 3000, paidBy: 'c', split: { mode: 'equal', members: ['c', 'd'] } },
+    { id: '4', amount: 999, paidBy: 'd', split: { mode: 'equal', members: ['a'] }, deleted: true },
+  ];
+  const bal = computeBalances(trip, members, exps);
+  const nets = Object.fromEntries(Object.entries(bal.members).map(([k, v]) => [k, v.net]));
+  eq('純残高（合計0）', nets, { a: 7000, b: 3000, c: -3500, d: -6500 });
+  eq('削除済みは数えない', bal.count, 3);
+  const s = settle(nets, { order: ['a', 'b', 'c', 'd'] });
+  const moved = s.transfers.reduce((acc, t) => { acc[t.from] = (acc[t.from] ?? 0) - t.amount; acc[t.to] = (acc[t.to] ?? 0) + t.amount; return acc; }, {});
+  eq('精算 送金で全員の残高がちょうど0になる', ['a', 'b', 'c', 'd'].map((id) => moved[id] ?? 0), [7000, 3000, -3500, -6500]);
+  eq('精算 送金は3回以内', s.transfers.length <= 3, true);
+
+  // 精算済みの送金を記録すると残りが減る
+  const exps2 = exps.concat([{ id: 't1', kind: 'transfer', from: 'd', to: 'a', amount: 6500 }]);
+  const bal2 = computeBalances(trip, members, exps2);
+  eq('送金記録後の残高', Object.fromEntries(Object.entries(bal2.members).map(([k, v]) => [k, v.net])), { a: 500, b: 3000, c: -3500, d: 0 });
+}
+{
+  // 最少回数：2組に分かれるケース（貪欲だと4回、最適は3回）
+  const nets = { a: 5, b: -5, c: 7, d: -3, e: -4 };
+  eq('最少回数 3回', settle(nets).transfers.length, 3);
+  const nets2 = { a: 100, b: 100, c: -100, d: -100 };
+  eq('ペアになるなら2回', settle(nets2).transfers.length, 2);
+}
+{
+  // 端数まとめ（10円単位）と幹事
+  const nets = { a: 1234, b: -617, c: -617 };
+  const s = settle(nets, { unit: 10, order: ['a', 'b', 'c'] });
+  eq('10円単位', s.transfers.every((t) => t.amount % 10 === 0), true);
+  const s2 = settle({ a: 3000, b: -1000, c: -1000, d: -1000 }, { hub: 'b', order: ['a', 'b', 'c', 'd'] });
+  eq('幹事b にまとめる', s2.transfers, [{ from: 'b', to: 'a', amount: 3000 }, { from: 'c', to: 'b', amount: 1000 }, { from: 'd', to: 'b', amount: 1000 }]);
+}
+
+out.insertAdjacentHTML('afterbegin', `<h2 id="summary" class="${fail ? 'ng' : 'ok'}">${pass} 件成功 / ${fail} 件失敗</h2>`);
+</script>
+</body>
+</html>
