@@ -1,12 +1,13 @@
 # たびわり アイコン生成（Node/Python不要、.NET System.Drawing のみ）
 # 使い方: powershell -ExecutionPolicy Bypass -File icons/generate-icons.ps1
 # 他の自作アプリと角丸の形・余白をそろえ、色と中の記号だけ変えている。
-# 記号：コインがまっぷたつに割れている（＝割り勘）
+# 記号：お札（真ん中に¥）を3枚に等しく切り分け、少しずつずらした形（＝お金を等分する）
 Add-Type -AssemblyName System.Drawing
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-function RoundRect($x, $y, $w, $h, $r) {
+function C($hex) { return [System.Drawing.ColorTranslator]::FromHtml($hex) }
+function RoundRect([single]$x, [single]$y, [single]$w, [single]$h, [single]$r) {
   $p = New-Object System.Drawing.Drawing2D.GraphicsPath
   $d = $r * 2
   $p.AddArc($x, $y, $d, $d, 180, 90)
@@ -17,40 +18,58 @@ function RoundRect($x, $y, $w, $h, $r) {
   return $p
 }
 
-$bg = [System.Drawing.Color]::FromArgb(255, 0xFF, 0xC9, 0x40)   # --sun
-$fg = [System.Drawing.Color]::FromArgb(255, 0x1B, 0x1C, 0x1E)   # --ink
+$bg   = '#FFC940'   # --sun
+$note = '#FFFFFF'   # お札
+$line = '#E3AE2B'   # お札の内側の枠
+$seal = '#1B1C1E'   # 真ん中の丸（--ink）
+$yen  = '#FFC940'
 
-function Draw-Symbol($g, [single]$size, $brush, [single]$scale) {
-  $r   = $size * 0.27 * $scale
-  $cx  = $size * 0.5
-  $cy  = $size * 0.5
-  $gap = $size * 0.035 * $scale
-  $dy  = $size * 0.03 * $scale
-  # 左半分（少し上へ）・右半分（少し下へ）
-  $g.FillPie($brush, [single]($cx - $r - $gap), [single]($cy - $r - $dy), [single]($r * 2), [single]($r * 2), 90, 180)
-  $g.FillPie($brush, [single]($cx - $r + $gap), [single]($cy - $r + $dy), [single]($r * 2), [single]($r * 2), 270, 180)
-  # コインのふちの内側の線（大きいサイズのときだけ）
-  if ($size -ge 128) {
-    $pen = New-Object System.Drawing.Pen($bg, [single]($size * 0.018 * $scale))
-    $ri = $r * 0.72
-    $g.DrawArc($pen, [single]($cx - $ri - $gap), [single]($cy - $ri - $dy), [single]($ri * 2), [single]($ri * 2), 100, 160)
-    $g.DrawArc($pen, [single]($cx - $ri + $gap), [single]($cy - $ri + $dy), [single]($ri * 2), [single]($ri * 2), 280, 160)
-    $pen.Dispose()
+function Draw-Symbol($g, [single]$S, [single]$scale) {
+  $W = $S * 0.74 * $scale; $H = $S * 0.44 * $scale
+  $n = 3
+  $gap = $S * 0.032 * $scale
+  $shift = $S * 0.035 * $scale
+  $x0 = ($S - $W) / 2; $y0 = ($S - $H) / 2
+  $part = $W / $n
+  # 切り分けて隙間を空けた分だけ全体が広がるので、左に寄せて真ん中に置く
+  $startX = $x0 - $gap * ($n - 1) / 2
+  for ($i = 0; $i -lt $n; $i++) {
+    $srcX = $x0 + $i * $part
+    $dx = ($startX + $i * ($part + $gap)) - $srcX
+    $dy = @($shift, 0, -$shift)[$i]
+    $g.ResetTransform(); $g.ResetClip()
+    $g.TranslateTransform([single]$dx, [single]$dy)
+    $g.SetClip((New-Object System.Drawing.RectangleF([single]$srcX, [single]0, [single]$part, [single]$S)))
+    $g.FillPath((New-Object System.Drawing.SolidBrush (C $note)), (RoundRect $x0 $y0 $W $H ($S * 0.045 * $scale)))
+    if ($S -ge 64) {
+      $pen = New-Object System.Drawing.Pen((C $line), [single]($S * 0.014 * $scale))
+      $in = $S * 0.04 * $scale
+      $g.DrawPath($pen, (RoundRect ($x0 + $in) ($y0 + $in) ($W - 2 * $in) ($H - 2 * $in) ($S * 0.025 * $scale)))
+      $pen.Dispose()
+    }
+    $r = $S * 0.105 * $scale
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush (C $seal)), [single]($S / 2 - $r), [single]($S / 2 - $r), [single]($r * 2), [single]($r * 2))
+    $font = New-Object System.Drawing.Font('Arial', [single]($S * 0.15 * $scale), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    $sf = New-Object System.Drawing.StringFormat
+    $sf.Alignment = 'Center'; $sf.LineAlignment = 'Center'
+    $g.DrawString([string][char]0x00A5, $font, (New-Object System.Drawing.SolidBrush (C $yen)), (New-Object System.Drawing.RectangleF([single]0, [single]($S * 0.01 * $scale), [single]$S, [single]$S)), $sf)
   }
+  $g.ResetTransform(); $g.ResetClip()
 }
 
 function New-Icon([int]$size, [string]$path, [bool]$square, [single]$scale = 1.0) {
   $bmp = New-Object System.Drawing.Bitmap($size, $size)
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $bgBrush = New-Object System.Drawing.SolidBrush($bg)
+  $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+  $bgBrush = New-Object System.Drawing.SolidBrush((C $bg))
   if ($square) {
+    # iOS のホーム画面は自分で角を丸めるので、apple-touch-icon とマスク用は四角のまま
     $g.FillRectangle($bgBrush, 0, 0, $size, $size)
   } else {
-    $g.FillPath($bgBrush, (RoundRect 0 0 $size $size ([int]($size * 0.22))))
+    $g.FillPath($bgBrush, (RoundRect 0 0 $size $size ($size * 0.22)))
   }
-  $fgBrush = New-Object System.Drawing.SolidBrush($fg)
-  Draw-Symbol $g ([single]$size) $fgBrush $scale
+  Draw-Symbol $g ([single]$size) $scale
   $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose()
   $bmp.Dispose()
